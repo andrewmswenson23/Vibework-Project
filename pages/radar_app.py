@@ -10,11 +10,34 @@ st.set_page_config(page_title="Vibework | Buying Signal Radar", layout="wide")
 TARGETS = {
     "Hoffman Construction": "https://www.hoffmancorp.com",
     "Jacobs": "https://www.jacobs.com",
+    "McKinstry": "https://www.mckinstry.com",
+    "Layton Construction": "https://www.laytonconstruction.com",
+    "Sundt Construction": "https://www.sundt.com",
+    "Clayco": "https://www.claycorp.com",
+    "Holder Construction": "https://www.holderconstruction.com",
+    "Ryan Companies": "https://www.ryancompanies.com",
     "Skanska USA": "https://www.usa.skanska.com",
+    "Lease Crutcher Lewis": "https://lewisbuilds.com",
+    "HITT Contracting": "https://www.hitt.com",
+    "GLY Construction": "https://www.gly.com",
+    "Mortenson": "https://www.mortenson.com",
+    "Lydig Construction": "https://www.lydig.com",
+    "Swinerton": "https://www.swinerton.com",
+    "McCarthy Building Companies": "https://www.mccarthy.com",
+    "Hensel Phelps": "https://www.henselphelps.com",
+    "Kiewit Corp.": "https://www.kiewit.com",
     "Turner Construction": "https://www.turnerconstruction.com",
-    "Kiewit Corp.": "https://www.kiewit.com"
-    # Add your full list of 30 targets here 
-}
+    "DPR Construction": "https://www.dpr.com",
+    "Granite Construction": "https://www.graniteconstruction.com",
+    "Clark Construction": "https://www.clarkconstruction.com",
+    "Whiting-Turner": "https://www.whiting-turner.com",
+    "Balfour Beatty US": "https://balfourbeattyus.com",
+    "PCL Construction": "https://www.pcl.com",
+    "Primoris Services": "https://www.prim.com",
+    "Hathaway Dinwiddie": "https://www.hathawaydinwiddie.com",
+    "Devcon Construction": "https://www.devcon-const.com",
+    "Flatiron Construction": "https://www.fdcorp.com/en",
+    "Webcor": "https://www.webcor.com"
 
 KEYWORDS = ["vdc", "digital twin", "predictive analytics", "machine learning", "workflow automation", "bim"]
 
