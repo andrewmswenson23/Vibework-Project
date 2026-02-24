@@ -108,9 +108,6 @@ def main():
     sm.A.run_simulation(iterations=iters)
     sorted_tasks = sorted([t['id'] for t in sm.A.schedule], key=lambda x: sm.A.crit_index.get(x, 0), reverse=True)
 
-    # ---------------- War Room controls (Scenario) ----------------
-    st.markdown("#Scenario Tester")
-
     war_left, war_right = st.columns([1, 1])
     with war_left:
         sel_task = st.selectbox("Stress-Test Task", sorted_tasks, index=0 if sorted_tasks else 0)
