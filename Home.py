@@ -7,7 +7,7 @@ import plotly.graph_objects as go
 import streamlit.components.v1 as components
 from datetime import date
 
-from health_scanner import (
+from risk_engine import (
     schedulesdb, compilescheduletodigraph, getcriticalpathnodes, visualizetopology,
     calculate_health_score, run_cpm, run_cpm_with_deadline, structural_chokepoints, 
     correlated_monte_carlo_schedule, add_super_source_sink, shock_propagation, 

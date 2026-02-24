@@ -5,3 +5,5 @@ networkx
 plotly
 scipy
 pyvis
+beautifulsoup4
+requests
