@@ -41,15 +41,27 @@ TARGETS = {
 
 KEYWORDS = ["vdc", "digital twin", "predictive analytics", "machine learning", "workflow automation", "bim"]
 
+import re
+
 def scan_site(url):
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
         response = requests.get(url, headers=headers, timeout=5)
         soup = BeautifulSoup(response.text, 'html.parser')
-        for noise in soup(["script", "style", "nav", "footer", "header"]):
+        
+        # Decompose more noise (including the head if you want only body text)
+        for noise in soup(["script", "style", "nav", "footer", "header", "head"]):
             noise.decompose()
+            
         text = soup.get_text(separator=' ').lower()
-        return {kw: text.count(kw) for kw in KEYWORDS}
+        
+        # Use Regex to match whole words only
+        results = {}
+        for kw in KEYWORDS:
+            # \b matches the space or punctuation around the word
+            matches = re.findall(rf'\b{kw}\b', text)
+            results[kw] = len(matches)
+        return results
     except:
         return {kw: 0 for kw in KEYWORDS}
 
