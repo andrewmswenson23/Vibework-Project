@@ -55,7 +55,7 @@ def scan_site(url):
 
 # --- UI ---
 st.title("🛰️ Buying Signal Radar")
-st.subheader("Automated Lead Intelligence for AEC Innovation")
+st.subheader("Intelligence Scan")
 
 if st.button("🚀 Start Daily Scan"):
     results = []
