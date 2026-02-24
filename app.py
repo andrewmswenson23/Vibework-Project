@@ -109,8 +109,7 @@ def main():
     sorted_tasks = sorted([t['id'] for t in sm.A.schedule], key=lambda x: sm.A.crit_index.get(x, 0), reverse=True)
 
     # ---------------- War Room controls (Scenario) ----------------
-    st.markdown("## 🚨 War Room: Scenario Tester")
-    st.markdown("Pick a task and apply a delay to see the delta vs Baseline (negative float will appear when deadline is breached).")
+    st.markdown("#Scenario Tester")
 
     war_left, war_right = st.columns([1, 1])
     with war_left:
@@ -254,37 +253,6 @@ def main():
             )
         else:
             st.info("No downstream safety buffer was lost for this scenario.")
-
-    # ---------------- Crashing Optimizer (Budget Fixer) ----------------
-    with st.expander("💰 The Budget Fixer"):
-        st.markdown("If we are behind schedule, what is the absolute cheapest way to buy back our lost time?")
-        baseline_G = compilescheduletodigraph(sm.A.schedule)
-        baseline_cpm = run_cpm_with_deadline(add_super_source_sink(baseline_G) if use_super else baseline_G, baseline_deadline=baseline_deadline)
-        baseline_duration = baseline_cpm.get("ProjectDuration", 0.0)
-        
-        c1, c2 = st.columns([1,1])
-        with c1:
-            target = st.number_input("Target Duration (days)", min_value=1.0, value=max(1.0, baseline_duration - 10))
-        with c2:
-            st.caption(f"Baseline CPM: **{baseline_duration:.1f} d**")
-
-        crash_csv = st.file_uploader("Upload Crash Data CSV (columns: id, crash_max, crash_cost)", type=["csv"])
-        if crash_csv:
-            dfc = pd.read_csv(crash_csv)
-            crash_bounds, crash_costs = dict(zip(dfc["id"], dfc["crash_max"])), dict(zip(dfc["id"], dfc["crash_cost"]))
-            status, plan, expF = compute_crash_plan(G_base, target, crash_bounds, crash_costs)
-            st.write(f"Status: **{status}**")
-            if status == "OPTIMAL":
-                st.write(f"Expected Finish: **{expF:.1f} days**")
-                if plan:
-                    dfp = pd.DataFrame([{"Task": k, "Crash (days)": v, "Cost/day": crash_costs.get(k, 0), "Total Cost": v * crash_costs.get(k, 0)} for k, v in plan.items()]).sort_values("Total Cost", ascending=False)
-                    st.dataframe(dfp, use_container_width=True)
-                else:
-                    st.info("No crashing required under the constraints.")
-            elif status == "ORTOOLS_NOT_AVAILABLE":
-                st.warning("`ortools` not installed. Run: `pip install ortools`")
-            else:
-                st.error("Infeasible to reach the target with given crash bounds.")
 
 if __name__ == "__main__":
     main()
