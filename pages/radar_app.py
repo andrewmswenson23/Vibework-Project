@@ -37,7 +37,7 @@ TARGETS = {
     "Hathaway Dinwiddie": "https://www.hathawaydinwiddie.com",
     "Devcon Construction": "https://www.devcon-const.com",
     "Flatiron Construction": "https://www.fdcorp.com/en",
-    "Webcor": "https://www.webcor.com"
+    "Webcor": "https://www.webcor.com"}
 
 KEYWORDS = ["vdc", "digital twin", "predictive analytics", "machine learning", "workflow automation", "bim"]
 
