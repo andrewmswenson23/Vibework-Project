@@ -8,10 +8,26 @@ import time
 st.set_page_config(page_title="Vibework | Buying Signal Radar", layout="wide")
 
 TARGETS = {
+    # --- Utah Power Players (The $18B Pipeline) ---
+    "Big-D Construction": "https://big-d.com",
+    "Layton Construction": "https://www.laytonconstruction.com", # [cite: 30]
+    "Okland Construction": "https://www.okland.com", # [cite: 30]
+    "Jacobsen Construction": "https://www.jacobsenconstruction.com", # [cite: 30]
+    "Staker Parson Companies": "https://www.stakerparson.com",
+    "Rimrock Construction": "https://www.rimrock.us",
+    "R&O Construction": "https://www.randoco.com", # [cite: 35]
+    "Ralph L. Wadsworth Construction": "https://www.wadsco.com",
+    "Hogan & Associates Construction": "https://www.hoganconstruction.com",
+    "Westland Construction": "https://www.westlandconstruction.com",
+    "Clyde Companies": "https://www.clydeinc.com",
+    "Geneva Rock Products": "https://genevarock.com",
+    "Sunroc Corporation": "https://sunroc.com",
+    "W.W. Clyde & Co.": "https://wwclyde.net",
+
+    # --- National & Multistate Strategic Targets ---
     "Hoffman Construction": "https://www.hoffmancorp.com",
     "Jacobs": "https://www.jacobs.com",
     "McKinstry": "https://www.mckinstry.com",
-    "Layton Construction": "https://www.laytonconstruction.com",
     "Sundt Construction": "https://www.sundt.com",
     "Clayco": "https://www.claycorp.com",
     "Holder Construction": "https://www.holderconstruction.com",
@@ -37,7 +53,28 @@ TARGETS = {
     "Hathaway Dinwiddie": "https://www.hathawaydinwiddie.com",
     "Devcon Construction": "https://www.devcon-const.com",
     "Flatiron Construction": "https://www.fdcorp.com/en",
-    "Webcor": "https://www.webcor.com"}
+    "Webcor": "https://www.webcor.com",
+    "BNBuilders": "https://www.bnbuilders.com",
+    "Sellen": "https://www.sellen.com",
+    "Absher": "https://www.absherco.com",
+    "Tutor Perini": "https://www.tutorperini.com",
+    "Suffolk": "https://www.suffolk.com",
+    "Zachry": "https://www.zachrygroup.com",
+    "Austin Industries": "https://www.austin-ind.com",
+    "JE Dunn": "https://www.jedunn.com",
+    "Harvey-Cleary": "https://www.harvey-cleary.com",
+    "Manhattan Construction": "https://www.manhattanconstruction.com",
+    "Satterfield & Pontikes": "https://www.s-p-c.com",
+    "SpawGlass": "https://www.spawglass.com",
+    "Rogers-O'Brien": "https://www.r-o.com",
+    "Pogue": "https://www.pogueconstruction.com",
+    "Saunders": "https://www.saundersinc.com",
+    "Shaw Construction": "https://www.shawconstruction.net",
+    "GE Johnson": "https://www.gejohnson.com",
+    "Adolfson & Peterson": "https://www.a-p.com",
+    "Haselden": "https://www.haselden.com",
+    "GH Phipps": "https://www.ghphipps.com"
+}
 
 KEYWORDS = ["vdc", "digital twin", "predictive analytics", "machine learning", "workflow automation", "bim"]
 
