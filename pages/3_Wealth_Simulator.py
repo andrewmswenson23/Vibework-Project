@@ -1,31 +1,50 @@
-# Wealth Simulator
+import streamlit as st
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
 
-## Overview
-This wealth simulator aids in financial planning and investment strategy by simulating various scenarios.
+# Constants
+INFLATION_RATE = 0.03  # 3% annual inflation
 
-## Features
-- **Zombie Portfolio Bug Fix**: Resolution of issues caused by underperforming asset classes that drain overall returns.
-- **Log-Normal Trap Prevention**: Implements checks to prevent assumptions leading to misleading models resulting from log-normal distributions in assets.
-- **Inflation Adjustment**: Adjusts investment returns based on current and projected inflation rates to ensure real return calculations.
-- **Glide Path Support**: Allows users to set a glide path for asset allocation over time to align with personal risk tolerance and investment horizon.
-- **Guardrails Rule**: Incorporates guardrails to limit deviations from predefined risk profiles based on volatility and drawdown thresholds.
-- **AI Client Memo Generator**: Generates personalized memos for clients summarizing their investment strategies and projections using AI-driven insights.
+# Portfolio class
+class WealthSimulator:
+    def __init__(self, initial_investment, withdrawal_amount, return_rate, years):
+        self.initial_investment = initial_investment
+        self.withdrawal_amount = withdrawal_amount
+        self.return_rate = return_rate
+        self.years = years
+        self.portfolio_values = []
 
-## Usage Instructions
-1. Initialize the wealth simulator with initial parameters.
-2. Simulate different market conditions to observe portfolio performance.
-3. Review the generated AI memos for insights on portfolio health and adjustments.
+    def simulate(self):
+        current_value = self.initial_investment
+        for year in range(self.years):
+            # Log-Normal Trap Prevention
+            returns = np.clip(np.random.normal(self.return_rate, 0.1, size=1)[0], -1.0, None)
+            current_value *= (1 + returns)
+            current_value = max(current_value, 0)  # Zombie Portfolio Bug Fix
+            current_value -= self.withdrawal_amount * (1 + INFLATION_RATE) ** year
+            current_value = max(current_value, 0)  # Avoid negatives
+            self.portfolio_values.append(current_value)
 
-## Example
-```python
-if __name__ == '__main__':
-    simulator = WealthSimulator(initial_investment=100000, investment_years=20)
-    simulator.simulate()  # Run the simulation
-    print(simulator.generate_report()) # Generate and print the report
-    memo = simulator.generate_ai_client_memo()  # Create client memo
-    print(memo)
-```
+    def get_values(self):
+        return self.portfolio_values
 
-## Notes
-- Ensure that your Python environment has the necessary packages installed.
-- Consider fine-tuning the parameters based on individual financial goals and market outlooks.
+st.title("Wealth Simulator")
+
+initial_investment = st.number_input("Initial Investment", min_value=1000, value=10000)
+withdrawal_amount = st.number_input("Annual Withdrawal Amount", min_value=0, value=5000)
+return_rate = st.number_input("Expected Rate of Return (in decimal)", min_value=0.0, max_value=1.0, value=0.07)
+years = st.number_input("Number of Years", min_value=1, value=30)
+
+if st.button("Simulate"):  
+    simulator = WealthSimulator(initial_investment, withdrawal_amount, return_rate, years)
+    simulator.simulate()
+    results = simulator.get_values()
+
+    st.line_chart(results)
+    st.write(f"Final Portfolio Value: {results[-1]:.2f}")
+
+# Dynamic Glide Path & Guardrails Rule Implementation
+# Add additional features for asset allocation shifts and automatic adjustments
+# Stress Test Scenarios & Risk Analysis
+# Placeholder for additional inputs and drop-downs
