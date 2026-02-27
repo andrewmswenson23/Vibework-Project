@@ -1,6 +1,6 @@
 # app.py
 import streamlit as st
-import json, copy, os, hashlib
+import json, copy, os, hashlib, tempfile
 import numpy as np
 import pandas as pd
 import plotly.express as px
@@ -8,18 +8,12 @@ import plotly.graph_objects as go
 import streamlit.components.v1 as components
 from datetime import date, datetime
 
-# --- CRITICAL FIX: Import from separated files ---
 from data_models import schedulesdb
-from risk_engine import (
-    compilescheduletodigraph, run_cpm, add_super_source_sink,
-    correlated_monte_carlo_schedule, getcriticalpathnodes,
-    visualizetopology, run_diagnostics, structural_chokepoints,
-    quantile_graph, task_finish_correlations, calculate_health_score
-)
+import risk_engine as re
 
 st.set_page_config(layout="wide", page_title="Vibework Risk Engine")
 
-# --- Custom Styling ---
+# --- CUSTOM CSS ---
 st.markdown("""
 <style>
     .metric-card { background-color: #f0f2f6; padding: 20px; border-radius: 10px; text-align: center; border-left: 4px solid #1E90FF; }
@@ -27,95 +21,96 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- State Helpers ---
-class State:
-    def __init__(self, schedule, start_date, use_super):
-        self.schedule = copy.deepcopy(schedule)
-        self.start_date = start_date
-        self.use_super = use_super
-        self.G = compilescheduletodigraph(self.schedule)
-        self.G_super = add_super_source_sink(self.G) if use_super else self.G
-        self.cpm = run_cpm(self.G_super)
-        self.deadline = float(self.cpm.get("ProjectDuration", 0.0))
-        self.sim_results = []
-        self.crit_index = {}
-
-    def run_simulation(self, iterations):
-        samples, crit = correlated_monte_carlo_schedule(
-            self.G, self.schedule, iterations=iterations, 
-            start_date=self.start_date, use_super_nodes=self.use_super
-        )
-        self.sim_results = samples
-        self.crit_index = crit
-
-class StateManager:
-    def __init__(self, base_sch, start_date, use_super):
-        self.A = State(base_sch, start_date, use_super)
-        self.B = State(base_sch, start_date, use_super)
-
-# --- Sidebar ---
+# --- SIDEBAR ---
 st.sidebar.header("⚙️ Engine Parameters")
-sel_pattern = st.sidebar.selectbox("Select Project Portfolio", list(schedulesdb.keys()))
-ld_rate = st.sidebar.number_input("Daily Liquidated Damages ($)", 0, 250000, 15000)
-iters = st.sidebar.number_input("Simulations (Monte Carlo)", 100, 10000, 1000)
-project_start = st.sidebar.date_input("Project Start Date", date(2026, 1, 1))
+sel_pattern = st.sidebar.selectbox("Project Portfolio", list(schedulesdb.keys()))
+ld_rate = st.sidebar.number_input("LD Rate ($/Day)", 0, 100000, 15000)
+iters = st.sidebar.number_input("Simulations", 100, 5000, 1000)
+project_start = st.sidebar.date_input("Start Date", date(2026, 1, 1))
 use_super = st.sidebar.checkbox("Enable Super Nodes", value=True)
 
-# --- State Management Logic ---
+# --- STATE MANAGEMENT ---
 base_sch = schedulesdb[sel_pattern]
-base_sch_hash = hashlib.sha256(json.dumps(base_sch).encode()).hexdigest()
-state_key = (sel_pattern, project_start.isoformat(), int(iters), bool(use_super), base_sch_hash)
+base_hash = hashlib.md5(json.dumps(base_sch).encode()).hexdigest()
+state_key = (sel_pattern, iters, project_start.isoformat(), use_super, base_hash)
 
 if "sm_key" not in st.session_state or st.session_state.sm_key != state_key:
-    st.session_state.sm = StateManager(base_sch, project_start, use_super)
+    # Initialize baseline graph
+    G_base = re.compilescheduletodigraph(base_sch)
+    if use_super: G_base = re.add_super_source_sink(G_base)
+    
+    # Run Baseline Simulation
+    results, crit_idx, task_samples = re.correlated_monte_carlo_schedule(G_base, base_sch, iterations=iters)
+    
+    st.session_state.G = G_base
+    st.session_state.baseline_results = results
+    st.session_state.crit_index = crit_idx
     st.session_state.sm_key = state_key
 
-sm = st.session_state.sm
-
-# --- Main Logic ---
+# --- UI LOGIC ---
 st.title("🏗️ Project Risk & Exposure Engine")
+sorted_tasks = sorted(list(st.session_state.G.nodes), key=lambda x: st.session_state.crit_index.get(x, 0), reverse=True)
 
-# 1. Baseline Sim
-sm.A.run_simulation(iters)
-sorted_tasks = sorted([t['id'] for t in sm.A.schedule], key=lambda x: sm.A.crit_index.get(x, 0), reverse=True)
-
-# 2. Scenario Injection
 st.markdown("### ⚠️ Scenario Stress-Test")
-c_left, c_right = st.columns(2)
-with c_left:
+c1, c2 = st.columns(2)
+with c1:
     sel_task = st.selectbox("Inject Delay into Task:", sorted_tasks)
-with c_right:
+with c2:
     delay = st.slider("Delay Severity (Days):", -10, 30, 0)
 
-sm.B = State(sm.A.schedule, sm.A.start_date, sm.A.use_super)
-if delay != 0:
-    for t in sm.B.schedule:
-        if t["id"] == sel_task:
-            t["duration"] = max(0.0, t.get("duration", 0) + delay)
-    sm.B = State(sm.B.schedule, sm.B.start_date, sm.B.use_super)
+# Run Scenario Simulation
+G_scenario = st.session_state.G.copy()
+if delay != 0 and sel_task in G_scenario.nodes:
+    G_scenario.nodes[sel_task]['weight'] = max(0, G_scenario.nodes[sel_task]['weight'] + delay)
 
-sm.B.run_simulation(iters)
+scen_results, scen_crit, _ = re.correlated_monte_carlo_schedule(G_scenario, base_sch, iterations=iters)
 
-# --- Metrics Visualization ---
-p90_ref = np.percentile(sm.A.sim_results, 90) if sm.A.sim_results else 0
-p90_curr = np.percentile(sm.B.sim_results, 90) if sm.B.sim_results else 0
-exposure = (p90_curr - p90_ref) * ld_rate
+# --- METRICS ---
+p90_base = np.percentile(st.session_state.baseline_results, 90)
+p90_scen = np.percentile(scen_results, 90)
+exposure = (p90_scen - p90_base) * ld_rate
 
 st.markdown("---")
 m1, m2, m3 = st.columns(3)
-m1.metric("P90 Finish (Days)", f"{p90_curr:.1f}", delta=f"{p90_curr - p90_ref:+.1f}")
-m2.metric("Mean Finish (Days)", f"{np.mean(sm.B.sim_results):.1f}")
+m1.metric("P90 Safe Finish (Days)", f"{p90_scen:.1f}", delta=f"{p90_scen - p90_base:+.1f} d", delta_color="inverse")
+m2.metric("Mean Expected Finish", f"{np.mean(scen_results):.1f} Days")
 with m3:
-    st.markdown(f'<div class="{"metric-card-danger" if exposure > 0 else "metric-card"}"><b>Financial Risk: ${exposure:,.0f}</b></div>', unsafe_allow_html=True)
+    card_style = "metric-card-danger" if exposure > 0 else "metric-card"
+    st.markdown(f'<div class="{card_style}"><b>💸 Financial Exposure: ${exposure:,.0f}</b></div>', unsafe_allow_html=True)
 
-# --- HTML Topology Cleanup ---
-st.subheader("Network Topology Analysis")
-html_path = visualizetopology(sm.B.G, getcriticalpathnodes(sm.B.G))
-try:
+# --- VISUALIZATIONS ---
+st.markdown("---")
+left, right = st.columns([3, 2])
+
+with left:
+    st.subheader("Network Topology")
+    cp_nodes = re.getcriticalpathnodes(G_scenario)
+    html_path = re.visualizetopology(G_scenario, cp_nodes, delayed_node=sel_task)
     with open(html_path, 'r') as f:
-        components.html(f.read(), height=500)
-finally:
-    if os.path.exists(html_path): os.remove(html_path)
+        components.html(f.read(), height=550)
+    os.remove(html_path)
 
-if st.button("🤖 Generate Flash Report") and delay != 0:
-    st.info(f"AI ANALYSIS: Delaying {sel_task} by {delay} days created ${exposure:,.0f} in new financial exposure.")
+with right:
+    st.subheader("Probability Distribution")
+    fig = go.Figure()
+    fig.add_trace(go.Histogram(x=st.session_state.baseline_results, name="Baseline", marker_color='#3498DB', opacity=0.6))
+    fig.add_trace(go.Histogram(x=scen_results, name="Scenario", marker_color='#E74C3C', opacity=0.6))
+    fig.update_layout(barmode='overlay', height=550)
+    st.plotly_chart(fig, use_container_width=True)
+
+# --- RISK LANDSCAPE (TORNADO) ---
+st.markdown("---")
+st.subheader("🔎 Risk Landscape")
+t1, t2 = st.columns(2)
+
+with t1:
+    st.markdown("#### 🌪️ Top Risk Drivers (Correlation)")
+    corrs = re.task_finish_correlations(G_scenario, base_sch, iterations=iters//2)
+    df_corr = pd.DataFrame([{"Task": k, "Corr": v} for k, v in corrs.items()]).sort_values("Corr", ascending=True).tail(10)
+    st.plotly_chart(px.bar(df_corr, x="Corr", y="Task", orientation='h', color_discrete_sequence=['#3498DB']))
+
+with t2:
+    st.markdown("#### 🚦 Structural Bottlenecks")
+    bc = re.structural_chokepoints(G_scenario)
+    df_bc = pd.DataFrame([{"Task": k, "Risk": v} for k, v in bc.items()]).sort_values("Risk", ascending=False).head(10)
+    st.plotly_chart(px.bar(df_bc, x="Risk", y="Task", orientation='h', color_discrete_sequence=['#E74C3C']))
