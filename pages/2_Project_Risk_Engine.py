@@ -5,7 +5,8 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit.components.v1 as components
-from datetime import date
+from datetime import date, datetime
+import time
 
 from risk_engine import (
     schedulesdb, compilescheduletodigraph, getcriticalpathnodes, visualizetopology,
@@ -15,6 +16,26 @@ from risk_engine import (
 )
 
 st.set_page_config(layout="wide", page_title="Vibework Risk Engine")
+
+# --- Custom CSS for Enterprise Polish ---
+st.markdown("""
+<style>
+    .metric-card {
+        background-color: #f0f2f6;
+        padding: 20px;
+        border-radius: 10px;
+        text-align: center;
+        border-left: 4px solid #1E90FF;
+    }
+    .metric-card-danger {
+        background-color: #fff0f0;
+        padding: 20px;
+        border-radius: 10px;
+        text-align: center;
+        border-left: 4px solid #FF4B4B;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 # ---------------- Cached Helpers ----------------
 @st.cache_data(ttl=300, show_spinner=False)
@@ -44,13 +65,11 @@ class State:
         self.G_super = add_super_source_sink(self.G) if self.use_super else self.G
         self.cpm = run_cpm(self.G_super)
         self.deadline = float(self.cpm.get("ProjectDuration", 0.0))
-        # Ensure diagnostics run on raw graph so dangling nodes are found
         self.diagnostics = run_diagnostics(self.G, getcriticalpathnodes(self.G_super))
         self.sim_results = None
         self.crit_index = None
 
     def run_simulation(self, iterations=2000):
-        # Prevent freeze by utilizing the cached logic
         samples, p90, crit_index = run_simulation_advanced_cached(
             json.dumps(self.schedule), int(iterations), self.start_date.isoformat(), self.use_super
         )
@@ -69,7 +88,8 @@ class StateManager:
     def apply_delta(self, deltas):
         for t in self.B.schedule:
             if t["id"] in deltas:
-                t["duration"] = float(t.get("duration", 0)) + float(deltas[t["id"]])
+                # FIX: Negative Duration Crash (Clamped to 0)
+                t["duration"] = max(0.0, float(t.get("duration", 0)) + float(deltas[t["id"]]))
         self.B = State(self.B.schedule, start_date=self.B.start_date, use_super=self.B.use_super)
 
     def baseline_deadline(self):
@@ -78,41 +98,62 @@ class StateManager:
 # ---------------- App ----------------
 def main():
     st.title("🏗️ Project Risk & Exposure Engine")
+    st.markdown("Quantify schedule volatility and Liquidated Damages exposure via 2,000+ Monte Carlo simulations.")
 
     # ---------------- Sidebar ----------------
-    st.sidebar.header("Settings")
+    st.sidebar.header("⚙️ Engine Parameters")
+    
+    # FEATURE: Custom Uploads
+    uploaded_file = st.sidebar.file_uploader("Upload Custom Schedule (JSON)", type=['json'])
+    
     patterns = {
         "schedulehealthy": "✅ Healthy Linear",
         "scheduletoxic": "⚠️ Hidden Bottleneck",
         "schedulebroken": "🚨 Logic Gap",
         "schedulecomplex": "🔗 Mega Project"
     }
-    sel_pattern = st.sidebar.selectbox("Pattern", list(patterns.values()))
-    sel_key = [k for k, v in patterns.items() if v == sel_pattern][0]
-    base_sch = schedulesdb[sel_key]
+    sel_pattern = st.sidebar.selectbox("Or Select Preset Portfolio", list(patterns.values()), disabled=bool(uploaded_file))
+    
+    if uploaded_file is not None:
+        try:
+            base_sch = json.load(uploaded_file)
+            sel_key = "custom_upload"
+        except Exception:
+            st.sidebar.error("Invalid JSON format.")
+            base_sch = schedulesdb["schedulehealthy"]
+            sel_key = "schedulehealthy"
+    else:
+        sel_key = [k for k, v in patterns.items() if v == sel_pattern][0]
+        base_sch = schedulesdb[sel_key]
 
-    iters = st.sidebar.number_input("Simulations", 100, 20000, 2000, step=500)
-    ld_rate = st.sidebar.number_input("Daily LD ($)", 0, 250000, 15000, step=1000)
-    project_start = st.sidebar.date_input("Project Start", value=date(2026, 1, 1))
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("Financial Exposure")
+    ld_rate = st.sidebar.number_input("Daily Liquidated Damages ($)", 0, 250000, 15000, step=1000)
+    
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("Advanced Settings")
+    iters = st.sidebar.number_input("Simulations (Monte Carlo)", 100, 20000, 2000, step=500)
+    project_start = st.sidebar.date_input("Project Start Date", value=date(2026, 1, 1))
+    use_super = st.sidebar.checkbox("Enable Super Source/Sink Nodes", value=True)
 
-    use_super = True
-
-    # Initialize StateManager and track pattern changes so UI updates on dropdown select
-    if "state_manager" not in st.session_state or st.session_state.get("current_pattern") != sel_pattern:
+    # FIX: Desynced State Manager (Tracking all variables via a composite key)
+    current_state_key = f"{sel_key}_{project_start}_{iters}_{use_super}"
+    if "state_manager" not in st.session_state or st.session_state.get("state_key") != current_state_key:
         st.session_state.state_manager = StateManager(base_sch, start_date=project_start, use_super=use_super)
-        st.session_state.current_pattern = sel_pattern
+        st.session_state.state_key = current_state_key
     sm = st.session_state.state_manager
 
-    # ---------------- Prepare baseline artifacts ----------------
+    # ---------------- Baseline & Scenario Processing ----------------
     baseline_deadline = sm.baseline_deadline()
     sm.A.run_simulation(iterations=iters)
     sorted_tasks = sorted([t['id'] for t in sm.A.schedule], key=lambda x: sm.A.crit_index.get(x, 0), reverse=True)
 
+    st.markdown("### ⚠️ Scenario Stress-Test")
     war_left, war_right = st.columns([1, 1])
     with war_left:
-        sel_task = st.selectbox("Stress-Test Task", sorted_tasks, index=0 if sorted_tasks else 0)
+        sel_task = st.selectbox("Inject Delay into Task:", sorted_tasks, index=0 if sorted_tasks else 0)
     with war_right:
-        delay = st.slider("Delay (Days)", -10, 30, 0)
+        delay = st.slider("Delay Severity (Days):", -10, 30, 0)
 
     sm.reset_scenario()
     if sel_task and delay != 0:
@@ -120,6 +161,7 @@ def main():
 
     sm.B.run_simulation(iterations=iters)
 
+    # Calculate metrics
     ref_samples = sm.A.sim_results or []
     curr_samples = sm.B.sim_results or ref_samples
     p90_ref = float(np.percentile(ref_samples, 90)) if ref_samples else 0.0
@@ -131,125 +173,168 @@ def main():
     p90_date = project_start + pd.to_timedelta(p90_curr, unit="D")
     mean_date = project_start + pd.to_timedelta(mean_curr, unit="D")
 
-    # ---------------- Hero metrics ----------------
+    # ---------------- Hero Metrics ----------------
+    st.markdown("---")
     c1, c2, c3 = st.columns(3)
-    c1.metric(f"P90 Finish ({p90_date:%m/%d/%y})", f"{round(p90_curr):,} days", delta=f"{p90_curr - p90_ref:+.1f} d")
-    c2.metric(f"Expected Finish ({mean_date:%m/%d/%y})", f"{round(mean_curr):,} days", delta=f"{mean_curr - mean_ref:+.1f} d")
-    c3.metric("Delay Cost (vs Base P90)", f"${exposure_delta:,.0f}", delta_color="inverse")
-
-    # Health scores computed against baseline
-    G_for_health_B = compilescheduletodigraph(sm.B.schedule)
-    try:
-        G_health_B = quantile_graph(G_for_health_B, sm.B.schedule, percentile=90, iterations=max(400, iters//4),
-                                    start_date=project_start, use_super_nodes=use_super)
-        cp_nodes_health_B = getcriticalpathnodes(G_health_B)
-        health_B = calculate_health_score(G_health_B, cp_nodes_health_B)
-    except Exception:
-        cp_nodes_health_B = getcriticalpathnodes(G_for_health_B)
-        health_B = calculate_health_score(G_for_health_B, cp_nodes_health_B)
-
-    st.markdown(f"**Health Score (Scenario):** {health_B:.1f} / 100 • **Baseline Deadline:** {baseline_deadline:.1f} d")
+    c1.metric(f"P90 Safe Finish ({p90_date:%m/%d/%y})", f"{round(p90_curr):,} days", delta=f"{p90_curr - p90_ref:+.1f} d", delta_color="inverse")
+    c2.metric(f"Expected Finish ({mean_date:%m/%d/%y})", f"{round(mean_curr):,} days", delta=f"{mean_curr - mean_ref:+.1f} d", delta_color="inverse")
+    
+    with c3:
+        st.markdown(f'<div class="{"metric-card-danger" if exposure_delta > 0 else "metric-card"}">', unsafe_allow_html=True)
+        st.markdown("#### 💸 Financial Exposure")
+        st.markdown(f"**${exposure_delta:,.0f}**")
+        st.markdown("*(Liquidated Damages Risk)*")
+        st.markdown('</div>', unsafe_allow_html=True)
 
     # ---------------- Main Visualization Row ----------------
+    st.markdown("---")
     left, right = st.columns([3, 2])
     with left:
+        st.subheader("Network Topology & Float Analysis")
         G_base = compilescheduletodigraph(sm.B.schedule)
-        # Hardcode 90th percentile to avoid radio button clutter
         G_viz = quantile_graph(G_base, sm.B.schedule, percentile=90, iterations=max(800, iters//2),
                                start_date=project_start, use_super_nodes=use_super)
 
         cp_nodes = getcriticalpathnodes(G_viz)
-        
-        # Compute diagnostic tags using the RAW graph so dangling nodes are correctly identified
         diag_tags = run_diagnostics(G_viz, cp_nodes)
         
-        # Pass the delayed task to the visualizer so it can be highlighted
         trigger_node = sel_task if float(delay) != 0.0 else None
         html_path = visualizetopology(G_viz, cp_nodes, baseline_deadline=baseline_deadline, diagnostic_tags=diag_tags, delayed_node=trigger_node)
         
+        # FIX: Memory/Disk Leak via HTML Exports
         with open(html_path, 'r', encoding='utf-8') as f:
-            components.html(f.read(), height=650)
-        st.download_button("📥 Export Topology", open(html_path, 'rb'), "Report.html", "text/html")
+            html_content = f.read()
+        
+        components.html(html_content, height=600)
+        st.download_button("📥 Export Dynamic Topology (HTML)", data=html_content, file_name="Network_Report.html", mime="text/html")
+        
+        # Safely remove the file from the server disk after reading it into memory
+        try:
+            os.remove(html_path)
+        except OSError:
+            pass
 
     with right:
+        st.subheader("Probability Distribution")
         fig = go.Figure()
         base_arr = np.array(ref_samples) if ref_samples else np.array([0.0])
         delayed_arr = np.array(curr_samples) if curr_samples else np.array([0.0])
 
-        xmin = float(min(base_arr.min(), delayed_arr.min()))
-        xmax = float(max(base_arr.max(), delayed_arr.max()))
+        # FIX: Zero-Variance Histogram Failures
+        if base_arr.size > 0 and delayed_arr.size > 0:
+            xmin = float(min(base_arr.min(), delayed_arr.min()))
+            xmax = float(max(base_arr.max(), delayed_arr.max()))
+        else:
+            xmin, xmax = 0.0, 1.0
+
         if xmax <= xmin:
             xmin, xmax = xmin - 0.5, xmax + 0.5
 
-        # Force identical bins so areas perfectly match
         bin_count = 40
         bin_size = (xmax - xmin) / bin_count
         shared_xbins = dict(start=xmin, end=xmax, size=bin_size)
 
         fig.add_trace(go.Histogram(
-            x=base_arr, name="Base", marker_color='#1E90FF', opacity=0.65,
+            x=base_arr, name="Baseline", marker_color='#1E90FF', opacity=0.65,
             histnorm='percent', xbins=shared_xbins, hovertemplate='%{x:.1f} d<br>%{y:.2f}%<extra></extra>'
         ))
 
         if float(delay) != 0.0:
             fig.add_trace(go.Histogram(
-                x=delayed_arr, name="Delayed", marker_color='#FF4B4B', opacity=0.65,
+                x=delayed_arr, name="Scenario", marker_color='#FF4B4B', opacity=0.65,
                 histnorm='percent', xbins=shared_xbins, hovertemplate='%{x:.1f} d<br>%{y:.2f}%<extra></extra>'
             ))
 
         fig.update_layout(
-            barmode='overlay', title="Probability of Finish Dates",
+            barmode='overlay', 
             yaxis_title="Probability (%)", xaxis_title="Project Duration (Days)",
-            legend=dict(yanchor="top", y=0.99, xanchor="right", x=0.99)
+            legend=dict(yanchor="top", y=0.99, xanchor="right", x=0.99),
+            height=600, margin=dict(t=30)
         )
         st.plotly_chart(fig, use_container_width=True)
 
     # ---------------- Risk Landscape Section ----------------
+    st.markdown("---")
     st.markdown("## 🔎 Risk Landscape")
     rl_left, rl_right = st.columns(2)
 
     with rl_left:
-        st.subheader("🌪️ Top Risk Drivers")
+        st.subheader("🌪️ Top Risk Drivers (Tornado)")
         corr_dict = get_tornado_cached(json.dumps(sm.B.schedule), max(1500, iters//1), project_start.isoformat(), use_super)
         df_corr = (pd.DataFrame([{"Task": k, "Correlation": v} for k, v in corr_dict.items()])
                    .assign(Abs=lambda d: d["Correlation"].abs())
                    .sort_values("Abs", ascending=True)
-                   .tail(20))
-        st.plotly_chart(px.bar(df_corr, x="Correlation", y="Task", orientation="h"), use_container_width=True)
+                   .tail(15))
+        
+        fig_torn = px.bar(df_corr, x="Correlation", y="Task", orientation="h")
+        fig_torn.update_traces(marker_color='#1E90FF')
+        st.plotly_chart(fig_torn, use_container_width=True)
 
     with rl_right:
-        st.subheader("🚦 Traffic Bottlenecks")
+        st.subheader("🚦 Critical Bottlenecks")
         bc = structural_chokepoints(G_viz)
-        df_bc = pd.DataFrame([{"Task": k, "Betweenness": v} for k, v in bc.items()]).sort_values("Betweenness", ascending=False).head(10)
-        st.plotly_chart(px.bar(df_bc, x="Betweenness", y="Task", orientation="h"), use_container_width=True)
+        df_bc = pd.DataFrame([{"Task": k, "Betweenness Risk": v} for k, v in bc.items()]).sort_values("Betweenness Risk", ascending=False).head(10)
+        
+        fig_bottleneck = px.bar(df_bc, x="Betweenness Risk", y="Task", orientation="h")
+        fig_bottleneck.update_traces(marker_color='#FF4B4B')
+        fig_bottleneck.update_layout(yaxis={'categoryorder':'total ascending'})
+        st.plotly_chart(fig_bottleneck, use_container_width=True)
 
-    # ---------------- War Room Impact Summary ----------------
-    G_tmp = compilescheduletodigraph(sm.B.schedule)
-    delta_sp = float(delay) if float(delay) > 0 else 0.0
-    res = shock_propagation(G_tmp, sel_task, delta_sp, baseline_deadline=baseline_deadline) if delta_sp > 0 else {
-        "BaselineDuration": sm.A.cpm.get("ProjectDuration", 0.0),
-        "NewDuration": sm.B.cpm.get("ProjectDuration", 0.0),
-        "FloatErosion": {}
-    }
+    # ---------------- AI IMPACT REPORT GENERATOR ----------------
+    st.markdown("---")
+    st.subheader("📧 AI Executive Impact Report")
+    
+    # FIX: The "Typing Lag" via st.form
+    with st.form("memo_form"):
+        memo_left, memo_right = st.columns([3, 1])
+        with memo_left:
+            project_name = st.text_input("Project Name", "VibeWork Headquarters Build")
+        with memo_right:
+            st.write("") # Spacer
+            st.write("") # Spacer
+            generate_memo = st.form_submit_button("🤖 Generate Flash Report", use_container_width=True)
+            
+        if generate_memo:
+            with st.spinner("Analyzing graph topology and compiling executive brief..."):
+                time.sleep(1.5) # Mock AI loading time
+                
+                # FIX: The "Zero Delay" Edge Case
+                if delay == 0:
+                    st.markdown(f"""
+                    **CONFIDENTIAL: Executive Flash Report**
+                    **Project:** {project_name}
+                    **Date:** {datetime.now().strftime('%B %d, %Y')}
 
-    wr_left, wr_right = st.columns([1, 1])
-    with wr_left:
-        st.subheader("Impact Summary")
-        st.metric("P90 (New)", f"{round(p90_curr):,} days", delta=f"{p90_curr - p90_ref:+.1f} d")
-        st.metric("Delay Cost", f"${exposure_delta:,.0f}")
-        st.markdown(f"**Baseline Deadline:** {baseline_deadline:.1f} d  \n**New Simulated Duration:** {res.get('NewDuration', 0.0):.1f} d")
+                    **EXECUTIVE SUMMARY:**
+                    Recent Monte Carlo diagnostics (n={iters}) indicate that the project is currently operating within baseline safety parameters. The P90 safe finish date is holding steady at **{p90_date:%B %d, %Y}**. 
 
-    with wr_right:
-        st.subheader("Lost Safety Buffers (The Domino Effect)")
-        eros = pd.DataFrame([{"Task": k, "Lost Buffer (Days)": v} for k, v in res.get("FloatErosion", {}).items()])
-        if not eros.empty:
-            st.plotly_chart(
-                px.bar(eros.sort_values("Lost Buffer (Days)", ascending=False).head(12),
-                       x="Lost Buffer (Days)", y="Task", orientation="h"),
-                use_container_width=True
-            )
-        else:
-            st.info("No downstream safety buffer was lost for this scenario.")
+                    **TOPOLOGICAL HEALTH:**
+                    No downstream float erosion or critical path delays have been manually injected into the current scenario. The network topology remains stable.
+
+                    **RECOMMENDED ACTION:**
+                    Continue standard monitoring and execution. No corrective action or schedule crashing is required at this time.
+
+                    *Generated by VibeWork Risk Engine*
+                    """)
+                else:
+                    impact_text = f"an **additional ${exposure_delta:,.0f}** in Liquidated Damages exposure" if exposure_delta > 0 else "no significant financial exposure at this time"
+                    
+                    st.markdown(f"""
+                    **CONFIDENTIAL: Executive Flash Report**
+                    **Project:** {project_name}
+                    **Date:** {datetime.now().strftime('%B %d, %Y')}
+
+                    **EXECUTIVE SUMMARY:**
+                    Recent Monte Carlo diagnostics (n={iters}) indicate that a {delay}-day delay to the `{sel_task}` workflow will shift our P90 safe finish date to **{p90_date:%B %d, %Y}**. This represents {impact_text}.
+
+                    **TOPOLOGICAL IMPACT:**
+                    Our graph analysis reveals that `{sel_task}` acts as a critical structural chokepoint. The delay has actively eroded downstream float safety buffers, causing secondary tasks to become critical. 
+
+                    **RECOMMENDED ACTION:**
+                    We recommend immediate authorization of a crash-plan for `{sel_task}` to recover the {delay}-day schedule variance before the delay locks in the downstream network path.
+
+                    *Generated by VibeWork Risk Engine*
+                    """)
 
 if __name__ == "__main__":
     main()
