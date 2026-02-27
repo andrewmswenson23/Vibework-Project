@@ -7,3 +7,5 @@ scipy
 pyvis
 beautifulsoup4
 requests
+reportlab
+openai
