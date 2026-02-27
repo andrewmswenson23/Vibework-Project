@@ -180,6 +180,10 @@ def calculate_portfolio_stats(portfolio_paths):
 # AI CLIENT MEMO GENERATOR (Safe API Integration)
 # ============================================
 
+# ============================================
+# AI CLIENT MEMO GENERATOR (Fireworks AI Integration)
+# ============================================
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def generate_ai_client_memo(
     client_name,
@@ -195,24 +199,24 @@ def generate_ai_client_memo(
     guardrail_trigger_rate
 ):
     """
-    FIX: Safe Anthropic API Integration
+    FEATURE: Safe Fireworks AI Integration
+    - Uses OpenAI python client pointed at Fireworks base URL
     - Check Streamlit secrets first
     - Graceful fallback if API key missing
-    - Proper error handling
     """
-    
+
     try:
-        # FIX: Safely fetch API key from Streamlit secrets
-        api_key = st.secrets.get("ANTHROPIC_API_KEY")
+        # Safely fetch API key from Streamlit secrets
+        api_key = st.secrets.get("FIREWORKS_API_KEY")
         if not api_key:
             return """
 ⚠️ **Setup Required**
 
-The AI memo generator requires an Anthropic API key to be configured in Streamlit secrets.
+The AI memo generator requires a Fireworks API key to be configured in Streamlit secrets.
 
 To set up:
-1. Get an API key from [Anthropic Console](https://console.anthropic.com)
-2. Add it to your Streamlit secrets: `ANTHROPIC_API_KEY = "your-key-here"`
+1. Get an API key from [Fireworks AI](https://fireworks.ai/)
+2. Add it to your Streamlit secrets: `FIREWORKS_API_KEY = "your-key-here"`
 3. Restart the app
 
 For now, here is a template memo:
@@ -243,9 +247,13 @@ Your Wealth Management Team
                 success_rate=success_rate
             )
         
-        # Safe initialization with proper error handling
-        import anthropic
-        client = anthropic.Anthropic(api_key=api_key)
+        # Fireworks AI uses the standard OpenAI python package
+        from openai import OpenAI
+        
+        client = OpenAI(
+            base_url="https://api.fireworks.ai/inference/v1",
+            api_key=api_key
+        )
         
         phase_text = "accumulation" if phase == "accumulation" else "retirement/distribution"
         
@@ -273,20 +281,20 @@ Write a professional 3-paragraph memo that:
 Keep it professional, warm, and avoid jargon.
 """
         
-        message = client.messages.create(
-            model="claude-3-5-sonnet-20241022",
-            max_tokens=1024,
+        # Call the Llama 3 70B Instruct model via Fireworks
+        response = client.chat.completions.create(
+            model="accounts/fireworks/models/llama-v3p1-70b-instruct",
             messages=[
                 {"role": "user", "content": prompt}
             ]
         )
         
-        return message.content[0].text
+        return response.choices[0].message.content
     
     except ImportError:
-        return "⚠️ Error: anthropic library not installed. Install with: `pip install anthropic`"
+        return "⚠️ Error: openai library not installed. Install with: `pip install openai` and add it to requirements.txt"
     except Exception as e:
-        return f"⚠️ Error generating memo: {str(e)}\n\nMake sure your ANTHROPIC_API_KEY is properly configured in Streamlit secrets."
+        return f"⚠️ Error generating memo: {str(e)}\n\nMake sure your FIREWORKS_API_KEY is properly configured in Streamlit secrets."
 
 # ============================================
 # PDF EXPORT (Goldman Polish)
