@@ -90,7 +90,16 @@ arch_col1, arch_col2 = st.columns(2)
 
 with arch_col1:
     st.markdown("""
-#### Data Ingestion Layer
+#### 📥 Data Ingestion Layer
 - **Construction:** P6 schedules (Primavera), CSV task lists, unstructured delays
 - **Finance:** Portfolio allocations, withdrawal amounts, market parameters
-- **Market:** Web
+- **Market:** Web scraping, NLP keyword detection, digital footprint analysis
+""")
+
+with arch_col2:
+    st.markdown("""
+#### 🧠 Probabilistic Engine & Outputs
+- **Simulation:** 2,000+ Monte Carlo iterations, NetworkX dependency graphs
+- **Risk Quantification:** P90 finish dates, Liquidated Damages ($), Success Rates
+- **AI Translation:** Anthropic Claude integration for executive-ready memos
+""")
