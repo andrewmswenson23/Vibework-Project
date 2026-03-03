@@ -203,14 +203,14 @@ def main():
     with left:
         tab1, tab2 = st.tabs(["🕸️ Network Graph", "📊 Gantt Chart"])
         
-        with tab1:
-            G_base = compilescheduletodigraph(sm.B.schedule)
-            # Hardcode 90th percentile to avoid radio button clutter
-            G_viz = quantile_graph(G_base, sm.B.schedule, percentile=90, iterations=max(800, iters//2),
-                                   start_date=project_start, use_super_nodes=use_super)
+        # Build the P90 graph to use for BOTH visualizations so they are perfectly synced
+        G_base = compilescheduletodigraph(sm.B.schedule)
+        G_viz = quantile_graph(G_base, sm.B.schedule, percentile=90, iterations=max(800, iters//2),
+                               start_date=project_start, use_super_nodes=use_super)
 
-            cp_nodes = getcriticalpathnodes(G_viz)
-            
+        cp_nodes = getcriticalpathnodes(G_viz)
+        
+        with tab1:
             # Compute diagnostic tags using the RAW graph so dangling nodes are correctly identified
             diag_tags = run_diagnostics(G_viz, cp_nodes)
             
@@ -223,14 +223,20 @@ def main():
             st.download_button("📥 Export Topology", open(html_path, 'rb'), "Report.html", "text/html")
             
         with tab2:
+            # Re-run CPM on the P90 simulated graph so the Gantt chart stretches dynamically!
+            cpm_viz = run_cpm(G_viz)
+            
             start_dt = pd.to_datetime(project_start)
             gantt_data = []
             
-            for t_id in sm.B.G.nodes():
-                # Extract Early Start and Early Finish for the Gantt
-                es = sm.B.cpm.get("ES", {}).get(t_id, 0)
-                ef = sm.B.cpm.get("EF", {}).get(t_id, 0)
-                float_val = sm.B.cpm.get("Float", {}).get(t_id, 0)
+            for t_id in G_viz.nodes():
+                if t_id in ("SUPER_START", "SUPER_FINISH"): 
+                    continue # Hide the invisible super nodes from the Gantt chart
+                
+                # Extract Simulated Early Start and Early Finish
+                es = cpm_viz.get("ES", {}).get(t_id, 0)
+                ef = cpm_viz.get("EF", {}).get(t_id, 0)
+                float_val = cpm_viz.get("Float", {}).get(t_id, 0)
                 
                 gantt_data.append({
                     "Task": t_id,
