@@ -200,95 +200,82 @@ def main():
 
     # ---------------- Main Visualization Row ----------------
     left, right = st.columns([3, 2])
+    
+    # 1. Build the "Scenario Graph" once to use for BOTH visualizations
+    # This ensures the Gantt chart and the Network Graph show the EXACT same data
+    G_base = compilescheduletodigraph(sm.B.schedule)
+    G_viz = quantile_graph(G_base, sm.B.schedule, percentile=90, iterations=max(500, iters//4),
+                           start_date=project_start, use_super_nodes=use_super)
+    
+    # Run CPM on this simulated graph so we have the specific P90 dates for the Gantt bars
+    cpm_viz = run_cpm(G_viz)
+    cp_nodes = getcriticalpathnodes(G_viz)
+
     with left:
         tab1, tab2 = st.tabs(["🕸️ Network Graph", "📊 Gantt Chart"])
         
-        # Build the P90 graph to use for BOTH visualizations so they are perfectly synced
-        G_base = compilescheduletodigraph(sm.B.schedule)
-        G_viz = quantile_graph(G_base, sm.B.schedule, percentile=90, iterations=max(800, iters//2),
-                               start_date=project_start, use_super_nodes=use_super)
-
-        cp_nodes = getcriticalpathnodes(G_viz)
-        
         with tab1:
-            # Compute diagnostic tags using the RAW graph so dangling nodes are correctly identified
+            # Compute diagnostic tags using the RAW graph so dangling nodes are found
             diag_tags = run_diagnostics(G_viz, cp_nodes)
-            
-            # Pass the delayed task to the visualizer so it can be highlighted
             trigger_node = sel_task if float(delay) != 0.0 else None
-            html_path = visualizetopology(G_viz, cp_nodes, baseline_deadline=baseline_deadline, diagnostic_tags=diag_tags, delayed_node=trigger_node)
+            
+            html_path = visualizetopology(G_viz, cp_nodes, baseline_deadline=baseline_deadline, 
+                                           diagnostic_tags=diag_tags, delayed_node=trigger_node)
             
             with open(html_path, 'r', encoding='utf-8') as f:
-                components.html(f.read(), height=650)
+                components.html(f.read(), height=600)
             st.download_button("📥 Export Topology", open(html_path, 'rb'), "Report.html", "text/html")
             
         with tab2:
-            # Re-run CPM on the P90 simulated graph so the Gantt chart stretches dynamically!
-            cpm_viz = run_cpm(G_viz)
-            
             start_dt = pd.to_datetime(project_start)
             gantt_data = []
             
             for t_id in G_viz.nodes():
-                if t_id in ("SUPER_START", "SUPER_FINISH"): 
-                    continue # Hide the invisible super nodes from the Gantt chart
+                if t_id in ("SUPER_START", "SUPER_FINISH"): continue 
                 
-                # Extract Simulated Early Start and Early Finish
                 es = cpm_viz.get("ES", {}).get(t_id, 0)
                 ef = cpm_viz.get("EF", {}).get(t_id, 0)
-                float_val = cpm_viz.get("Float", {}).get(t_id, 0)
+                f_val = cpm_viz.get("Float", {}).get(t_id, 0)
                 
                 gantt_data.append({
                     "Task": t_id,
                     "Start": start_dt + pd.Timedelta(days=es),
                     "Finish": start_dt + pd.Timedelta(days=ef),
-                    "Float Buffer": float_val
+                    "Float Buffer": f_val,
+                    "Is Critical": "Critical" if f_val <= 1e-6 else "Non-Critical"
                 })
                 
             if gantt_data:
                 df_gantt = pd.DataFrame(gantt_data).sort_values(by="Start", ascending=True)
-                # Plotly Express Timeline (Gantt)
-                fig_gantt = px.timeline(df_gantt, x_start="Start", x_end="Finish", y="Task", color="Float Buffer",
-                                        color_continuous_scale="RdYlGn_r", height=650)
-                fig_gantt.update_yaxes(autorange="reversed") # Keep chronological order top-to-bottom
-                fig_gantt.update_layout(margin=dict(t=30, l=0, r=0, b=0))
+                
+                # Plotly Timeline - Tied directly to the P90 simulated dates
+                fig_gantt = px.timeline(
+                    df_gantt, x_start="Start", x_end="Finish", y="Task", 
+                    color="Float Buffer", color_continuous_scale="RdYlGn_r",
+                    title=f"Simulated P90 Timeline (Impact of {delay}d delay on {sel_task})",
+                    height=600
+                )
+                fig_gantt.update_yaxes(autorange="reversed") 
+                fig_gantt.update_layout(margin=dict(t=50, l=0, r=0, b=0), coloraxis_showscale=False)
                 st.plotly_chart(fig_gantt, use_container_width=True)
-            else:
-                st.info("No task data available to build timeline.")
 
     with right:
+        # Probability Histogram (Keep your existing histogram code here)
         fig = go.Figure()
         base_arr = np.array(ref_samples) if ref_samples else np.array([0.0])
         delayed_arr = np.array(curr_samples) if curr_samples else np.array([0.0])
 
-        xmin = float(min(base_arr.min(), delayed_arr.min()))
-        xmax = float(max(base_arr.max(), delayed_arr.max()))
-        if xmax <= xmin:
-            xmin, xmax = xmin - 0.5, xmax + 0.5
-
-        # Force identical bins so areas perfectly match
-        bin_count = 40
-        bin_size = (xmax - xmin) / bin_count
+        xmin, xmax = float(min(base_arr.min(), delayed_arr.min())), float(max(base_arr.max(), delayed_arr.max()))
+        bin_size = (xmax - xmin) / 40
         shared_xbins = dict(start=xmin, end=xmax, size=bin_size)
 
-        fig.add_trace(go.Histogram(
-            x=base_arr, name="Base", marker_color='#1E90FF', opacity=0.65,
-            histnorm='percent', xbins=shared_xbins, hovertemplate='%{x:.1f} d<br>%{y:.2f}%<extra></extra>'
-        ))
-
+        fig.add_trace(go.Histogram(x=base_arr, name="Base", marker_color='#1E90FF', opacity=0.6, histnorm='percent', xbins=shared_xbins))
         if float(delay) != 0.0:
-            fig.add_trace(go.Histogram(
-                x=delayed_arr, name="Delayed", marker_color='#FF4B4B', opacity=0.65,
-                histnorm='percent', xbins=shared_xbins, hovertemplate='%{x:.1f} d<br>%{y:.2f}%<extra></extra>'
-            ))
+            fig.add_trace(go.Histogram(x=delayed_arr, name="Delayed", marker_color='#FF4B4B', opacity=0.6, histnorm='percent', xbins=shared_xbins))
 
-        fig.update_layout(
-            barmode='overlay', title="Probability of Finish Dates",
-            yaxis_title="Probability (%)", xaxis_title="Project Duration (Days)",
-            legend=dict(yanchor="top", y=0.99, xanchor="right", x=0.99)
-        )
+        fig.update_layout(barmode='overlay', title="Finish Date Probability", yaxis_title="Prob %", xaxis_title="Days", height=600)
         st.plotly_chart(fig, use_container_width=True)
-
+        
     # ---------------- Risk Landscape Section ----------------
     st.markdown("## 🔎 Risk Landscape")
     rl_left, rl_right = st.columns(2)
