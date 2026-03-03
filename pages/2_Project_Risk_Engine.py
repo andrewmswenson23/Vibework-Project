@@ -201,23 +201,54 @@ def main():
     # ---------------- Main Visualization Row ----------------
     left, right = st.columns([3, 2])
     with left:
-        G_base = compilescheduletodigraph(sm.B.schedule)
-        # Hardcode 90th percentile to avoid radio button clutter
-        G_viz = quantile_graph(G_base, sm.B.schedule, percentile=90, iterations=max(800, iters//2),
-                               start_date=project_start, use_super_nodes=use_super)
+        tab1, tab2 = st.tabs(["🕸️ Network Graph", "📊 Gantt Chart"])
+        
+        with tab1:
+            G_base = compilescheduletodigraph(sm.B.schedule)
+            # Hardcode 90th percentile to avoid radio button clutter
+            G_viz = quantile_graph(G_base, sm.B.schedule, percentile=90, iterations=max(800, iters//2),
+                                   start_date=project_start, use_super_nodes=use_super)
 
-        cp_nodes = getcriticalpathnodes(G_viz)
-        
-        # Compute diagnostic tags using the RAW graph so dangling nodes are correctly identified
-        diag_tags = run_diagnostics(G_viz, cp_nodes)
-        
-        # Pass the delayed task to the visualizer so it can be highlighted
-        trigger_node = sel_task if float(delay) != 0.0 else None
-        html_path = visualizetopology(G_viz, cp_nodes, baseline_deadline=baseline_deadline, diagnostic_tags=diag_tags, delayed_node=trigger_node)
-        
-        with open(html_path, 'r', encoding='utf-8') as f:
-            components.html(f.read(), height=650)
-        st.download_button("📥 Export Topology", open(html_path, 'rb'), "Report.html", "text/html")
+            cp_nodes = getcriticalpathnodes(G_viz)
+            
+            # Compute diagnostic tags using the RAW graph so dangling nodes are correctly identified
+            diag_tags = run_diagnostics(G_viz, cp_nodes)
+            
+            # Pass the delayed task to the visualizer so it can be highlighted
+            trigger_node = sel_task if float(delay) != 0.0 else None
+            html_path = visualizetopology(G_viz, cp_nodes, baseline_deadline=baseline_deadline, diagnostic_tags=diag_tags, delayed_node=trigger_node)
+            
+            with open(html_path, 'r', encoding='utf-8') as f:
+                components.html(f.read(), height=650)
+            st.download_button("📥 Export Topology", open(html_path, 'rb'), "Report.html", "text/html")
+            
+        with tab2:
+            start_dt = pd.to_datetime(project_start)
+            gantt_data = []
+            
+            for t_id in sm.B.G.nodes():
+                # Extract Early Start and Early Finish for the Gantt
+                es = sm.B.cpm.get("ES", {}).get(t_id, 0)
+                ef = sm.B.cpm.get("EF", {}).get(t_id, 0)
+                float_val = sm.B.cpm.get("Float", {}).get(t_id, 0)
+                
+                gantt_data.append({
+                    "Task": t_id,
+                    "Start": start_dt + pd.Timedelta(days=es),
+                    "Finish": start_dt + pd.Timedelta(days=ef),
+                    "Float Buffer": float_val
+                })
+                
+            if gantt_data:
+                df_gantt = pd.DataFrame(gantt_data).sort_values(by="Start", ascending=True)
+                # Plotly Express Timeline (Gantt)
+                fig_gantt = px.timeline(df_gantt, x_start="Start", x_end="Finish", y="Task", color="Float Buffer",
+                                        color_continuous_scale="RdYlGn_r", height=650)
+                fig_gantt.update_yaxes(autorange="reversed") # Keep chronological order top-to-bottom
+                fig_gantt.update_layout(margin=dict(t=30, l=0, r=0, b=0))
+                st.plotly_chart(fig_gantt, use_container_width=True)
+            else:
+                st.info("No task data available to build timeline.")
 
     with right:
         fig = go.Figure()
